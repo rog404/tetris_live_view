@@ -1,5 +1,4 @@
 defmodule TetrisWeb.Router do
-  alias TetrisWeb.TetrisLive
   use TetrisWeb, :router
 
   pipeline :browser do
