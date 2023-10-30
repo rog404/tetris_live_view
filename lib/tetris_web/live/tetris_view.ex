@@ -4,7 +4,6 @@ defmodule TetrisWeb.TetrisView do
   def render(assigns) do
     ~H"""
     Tetris in Live View
-    
     """
   end
 end
