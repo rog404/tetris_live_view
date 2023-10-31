@@ -4,6 +4,7 @@ defmodule TetrisWeb.TetrisView do
   @column 10
   @row 20
   @reset_color "bg-gray-400"
+  @yellow "bg-yellow-300"
 
   def mount(_params, _session, socket) do
     socket
@@ -16,7 +17,12 @@ defmodule TetrisWeb.TetrisView do
     ~H"""
     <div class="flex justify-center">
       <div class="grid grid-cols-10 gap-0.5 border-4 rounded-sm">
-        <div :for={_cell_number <- 1..@cell_count} class="rounded-sm bg-gray-400 h-10 w-10" />
+        <div
+          :for={cell <- @cells}
+          class={"rounded-sm #{cell.color} h-10 w-10"}
+          phx-click="change_color"
+          phx-value-index={cell.index}
+        />
       </div>
     </div>
     """
@@ -31,10 +37,27 @@ defmodule TetrisWeb.TetrisView do
   end
 
   defp handle_initial_cells(socket) do
-    1..(@column * @row)
-    |> Enum.reduce(socket, fn cell_number, acc ->
-      cell_attribute = %{color: @reset_color}
-      assign(acc, String.to_atom("cell_#{cell_number}"), cell_attribute)
-    end)
+    cells =
+      0..(@column * @row - 1)
+      |> Enum.map(fn index ->
+        %{color: @reset_color, index: index}
+      end)
+
+    assign(socket, :cells, cells)
+  end
+
+  def handle_event("change_color", %{"index" => index}, socket) do
+    integer_index = String.to_integer(index)
+
+    socket =
+      socket
+      |> update(:cells, fn cells ->
+        Enum.map(cells, fn
+          %{index: ^integer_index} = cell -> %{cell | color: @yellow}
+          cell -> cell
+        end)
+      end)
+
+    {:noreply, socket}
   end
 end
