@@ -11,25 +11,29 @@ defmodule TetrisWeb.TetrisView do
   @orange "bg-orange-400"
 
   @tetrominos %{
-    t: [3, 4, 5, 14]
-    # f: [4, 5, 14, 24],
-    # n: [5, 14, 15, 24],
-    # o: [4, 5, 14, 15],
-    # r: [3, 4, 5, 13],
-    # s: [4, 5, 13, 14],
-    # i: [3, 4, 5, 6]
+    t: [3, 4, 5, 14],
+    f: [4, 5, 14, 24],
+    n: [5, 14, 15, 24],
+    o: [4, 5, 14, 15],
+    r: [3, 4, 5, 13],
+    s: [4, 5, 13, 14],
+    i: [3, 4, 5, 6]
   }
 
   def mount(_params, _session, socket) do
+    if connected?(socket), do: :timer.send_interval(1000, self(), :tick)
+
     socket
+    |> assign(:seconds, 0)
     |> handle_initial_values()
     |> handle_initial_cells()
+    |> handle_init_tetromino
     |> then(&{:ok, &1})
   end
 
   def render(assigns) do
     ~H"""
-    <div class="flex justify-center">
+    <div class="flex justify-center" phx-window-keydown="button">
       <div class="grid grid-cols-10 gap-0.5 border-4 rounded-sm">
         <div
           :for={cell <- @cells}
@@ -41,19 +45,22 @@ defmodule TetrisWeb.TetrisView do
       <div class="flex flex-col gap-2">
         <button
           class="ml-4 outline bg-green-600 h-10 rounded-sm p-2 text-white hover:bg-green-700"
-          phx-click="gen_tetromino"
+          phx-click="generate"
         >
-          Gerar Bloco
+          Generate
+        </button>
+        <button disabled class="ml-4 outline bg-gray-200 h-10 rounded-sm p-2 text-white">
+          Rotate
         </button>
         <button
-          class="ml-4 outline bg-amber-600 h-10 rounded-sm p-2 text-white hover:bg-amber-700"
-          phx-click="rot_tetromino"
+          class="ml-4 outline bg-blue-400 h-10 rounded-sm p-2 text-white hover:bg-blue-600"
+          phx-click="start_clock"
         >
-          Girar
+          Start
         </button>
         <button
           class="ml-4 outline bg-slate-500 h-10 rounded-sm p-2 text-white hover:bg-slate-700"
-          phx-click="reset_table"
+          phx-click="reset"
         >
           Reset
         </button>
@@ -80,10 +87,64 @@ defmodule TetrisWeb.TetrisView do
     assign(socket, :cells, cells)
   end
 
-  def handle_event("reset_table", _unsigned_params, socket) do
-    socket = put_flash(socket, :info, "Tabela Resetada")
+  defp handle_init_tetromino(socket) do
+    tetromino = %{
+      actual_coordinates: [0, 0, 0, 0],
+      new_coordinates: nil,
+      color: @reset_color,
+      type: nil
+    }
 
-    {:noreply, handle_initial_cells(socket)}
+    assign(socket, :tetromino, tetromino)
+  end
+
+  def handle_info(:tick, %{assigns: %{seconds: 0}} = socket) do
+    {:noreply, socket}
+  end
+
+  def handle_info(:tick, socket) do
+    socket
+    |> update(:tetromino, &fall_tetromino/1)
+    |> update(:seconds, &(&1 - 1))
+    |> render_tetromino()
+    |> then(&{:noreply, &1})
+  end
+
+  def handle_event("start_clock", _unsigned_params, socket) do
+    :timer.send_interval(1500, self(), :tick)
+
+    {:noreply, assign(socket, :seconds, 100)}
+  end
+
+  def handle_event("button", %{"key" => "h"}, socket) do
+    socket
+    |> update(:tetromino, &turn_tetromino_to(:left, &1))
+    |> render_tetromino()
+    |> then(&{:noreply, &1})
+  end
+
+  def handle_event("button", %{"key" => "l"}, socket) do
+    socket
+    |> update(:tetromino, &turn_tetromino_to(:right, &1))
+    |> render_tetromino()
+    |> then(&{:noreply, &1})
+  end
+
+  def handle_event("button", %{"key" => "j"}, socket) do
+    socket
+    |> update(:tetromino, &fall_tetromino/1)
+    |> render_tetromino()
+    |> then(&{:noreply, &1})
+  end
+
+  def handle_event("button", _params, socket), do: {:noreply, socket}
+
+  def handle_event("reset", _unsigned_params, socket) do
+    socket
+    |> put_flash(:info, "Resetando")
+    |> assign(:seconds, 0)
+    |> handle_initial_cells()
+    |> then(&{:noreply, &1})
   end
 
   def handle_event("change_color", %{"index" => index}, socket) do
@@ -92,25 +153,55 @@ defmodule TetrisWeb.TetrisView do
     {:noreply, change_one_cells_color(socket, integer_index)}
   end
 
-  def handle_event("gen_tetromino", _unsigned_params, socket) do
-    {tetromino, coord} = @tetrominos |> Enum.random()
+  def handle_event("generate", _unsigned_params, socket) do
+    {tetromino_type, coord} = @tetrominos |> Enum.random()
     random_color = [@yellow, @red, @blue, @green, @orange] |> Enum.random()
 
-    {:noreply, generate_tetromino(socket, {tetromino, coord, 0}, random_color)}
+    tetromino = %{
+      actual_coordinates: [0, 0, 0, 0],
+      new_coordinates: coord,
+      color: random_color,
+      type: tetromino_type
+    }
+
+    socket
+    |> assign(:tetromino, tetromino)
+    |> then(&{:noreply, render_tetromino(&1)})
   end
 
-  def handle_event("rot_tetromino", _unsigned_params, socket) do
-    cells = socket.assigns.cells
-
-    filtered_cells = Enum.filter(cells, &(&1.tetromino != nil))
-    coord = Enum.map(filtered_cells, & &1.index)
-
-    %{color: color, position: position, tetromino: tetromino} = List.first(filtered_cells)
-
-    {new_coord, new_position} = rotate_tetromino(coord, tetromino, position)
-
-    {:noreply, generate_tetromino(socket, {tetromino, new_coord, new_position}, color)}
+  def handle_event("rotate", _unsigned_params, socket) do
+    update(socket, :tetromino, &rotate_tetromino/1)
+    |> render_tetromino()
+    |> then(&{:noreply, &1})
   end
+
+  def handle_event("down", _unsigned_params, socket) do
+    update(socket, :tetromino, &fall_tetromino/1)
+    |> render_tetromino()
+    |> then(&{:noreply, &1})
+  end
+
+  defp fall_tetromino(%{actual_coordinates: actual_coordinates, new_coordinates: nil} = tetromino) do
+    %{tetromino | new_coordinates: add_to_array(10, actual_coordinates)}
+  end
+
+  defp turn_tetromino_to(
+         :left,
+         %{actual_coordinates: actual_coordinates, new_coordinates: nil} = tetromino
+       ) do
+    %{tetromino | new_coordinates: add_to_array(-1, actual_coordinates)}
+  end
+
+  defp turn_tetromino_to(
+         :right,
+         %{actual_coordinates: actual_coordinates, new_coordinates: nil} = tetromino
+       ) do
+    %{tetromino | new_coordinates: add_to_array(1, actual_coordinates)}
+  end
+
+  defp add_to_array(_number, []), do: []
+
+  defp add_to_array(number, [head | tail]), do: [head + number | add_to_array(number, tail)]
 
   defp change_one_cells_color(socket, index) do
     socket
@@ -122,71 +213,42 @@ defmodule TetrisWeb.TetrisView do
     end)
   end
 
-  defp generate_tetromino(socket, {tetromino_id, [first, second, third, fourth], position}, color) do
-    socket
-    |> handle_initial_cells()
-    |> update(:cells, fn cells ->
+  defp render_tetromino(%{assigns: %{tetromino: %{new_coordinates: nil}}} = socket), do: socket
+
+  defp render_tetromino(socket) do
+    %{actual_coordinates: actual_coordinates, new_coordinates: new_coordinates, color: color} =
+      socket.assigns.tetromino
+
+    [old_first, old_second, old_third, old_fourth] = actual_coordinates
+    [new_first, new_second, new_third, new_fourth] = new_coordinates
+
+    update(socket, :cells, fn cells ->
       Enum.map(cells, fn
-        %{index: ^first} = cell ->
-          %{cell | color: @blue, position: position, tetromino: tetromino_id}
-
-        %{index: ^second} = cell ->
-          %{cell | color: @yellow, position: position, tetromino: tetromino_id}
-
-        %{index: ^third} = cell ->
-          %{cell | color: @green, position: position, tetromino: tetromino_id}
-
-        %{index: ^fourth} = cell ->
-          %{cell | color: @red, position: position, tetromino: tetromino_id}
-
-        cell ->
-          cell
+        %{index: ^old_first} = cell -> %{cell | color: @reset_color}
+        %{index: ^old_second} = cell -> %{cell | color: @reset_color}
+        %{index: ^old_third} = cell -> %{cell | color: @reset_color}
+        %{index: ^old_fourth} = cell -> %{cell | color: @reset_color}
+        cell -> cell
       end)
     end)
+    |> update(:cells, fn cells ->
+      Enum.map(cells, fn
+        %{index: ^new_first} = cell -> %{cell | color: color}
+        %{index: ^new_second} = cell -> %{cell | color: color}
+        %{index: ^new_third} = cell -> %{cell | color: color}
+        %{index: ^new_fourth} = cell -> %{cell | color: color}
+        cell -> cell
+      end)
+    end)
+    |> update(:tetromino, &clean_tetromino/1)
   end
 
-  defp rotate_tetromino(array, :i, 0) do
-    {sum_list(array, [1, 10, 19, 28]), 1}
+  defp clean_tetromino(%{new_coordinates: nil} = tetromino), do: tetromino
+
+  defp clean_tetromino(tetromino) do
+    %{tetromino | actual_coordinates: tetromino.new_coordinates, new_coordinates: nil}
   end
 
-  defp rotate_tetromino(array, :i, 1) do
-    {sum_list(array, [-1, -10, -19, -28]), 0}
+  defp rotate_tetromino(%{type: :o}) do
   end
-
-  defp rotate_tetromino(array, :t, 0) do
-    {sum_list(array, [2, 11, 20, 0]), 1}
-  end
-
-  defp rotate_tetromino(array, :t, 1) do
-    {sum_list(array, [10, 0, -2, -21]), 2}
-  end
-
-  defp rotate_tetromino(array, :t, 2) do
-    {sum_list(array, [19, 0, -11, -1]), 3}
-  end
-
-  defp rotate_tetromino(array, :t, 3) do
-    {sum_list(array, [0, 0, 0, 0]), 0} |> dbg()
-  end
-
-  defp rotate_tetromino(array, :f, 0) do
-    {sum_list(array, [11, 20, 0, -11]), 1}
-  end
-
-  defp rotate_tetromino(array, :n, 0) do
-    {sum_list(array, [11, -9, 0, -20]), 1}
-  end
-
-  defp rotate_tetromino(array, :r, 0) do
-    {sum_list(array, [1, 10, 19, -10]), 1}
-  end
-
-  defp rotate_tetromino(array, :s, 0) do
-    {sum_list(array, [20, 9, -10, -1]), 1}
-  end
-
-  defp rotate_tetromino(array, _, _), do: {array, 0}
-
-  defp sum_list([], []), do: []
-  defp sum_list([h1 | t1], [h2 | t2]), do: [h1 + h2] ++ sum_list(t1, t2)
 end
