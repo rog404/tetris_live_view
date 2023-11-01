@@ -33,6 +33,7 @@ defmodule TetrisWeb.TetrisView do
 
   def render(assigns) do
     ~H"""
+    <h1>Tetris</h1>
     <div class="flex justify-center" phx-window-keydown="button">
       <div class="grid grid-cols-10 gap-0.5 border-4 rounded-sm">
         <div
